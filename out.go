@@ -37,8 +37,22 @@ func Put(request PutRequest, manager Github, inputDir string) (*PutResponse, err
 	}
 
 	// Set status if specified
-	if p := request.Params; p.Status != "" {
+	if p := request.Params; p.Status != "" || p.StatusFile != "" {
+		status := p.Status
 		description := p.Description
+
+		// Set status from a file
+		if p.StatusFile != "" {
+			content, err := ioutil.ReadFile(filepath.Join(inputDir, p.StatusFile))
+			if err != nil {
+				return nil, fmt.Errorf("failed to read status file: %s", err)
+			}
+			status = strings.TrimSpace(string(content))
+			err = validateStatus(status)
+			if err != nil {
+				return nil, err
+			}
+		}
 
 		// Set description from a file
 		if p.DescriptionFile != "" {
@@ -49,7 +63,7 @@ func Put(request PutRequest, manager Github, inputDir string) (*PutResponse, err
 			description = string(content)
 		}
 
-		if err := manager.UpdateCommitStatus(version.Commit, p.BaseContext, safeExpandEnv(p.Context), p.Status, safeExpandEnv(p.TargetURL), description); err != nil {
+		if err := manager.UpdateCommitStatus(version.Commit, p.BaseContext, safeExpandEnv(p.Context), status, safeExpandEnv(p.TargetURL), description); err != nil {
 			return nil, fmt.Errorf("failed to set status: %s", err)
 		}
 	}
@@ -111,6 +125,7 @@ type PutParameters struct {
 	TargetURL              string `json:"target_url"`
 	DescriptionFile        string `json:"description_file"`
 	Description            string `json:"description"`
+	StatusFile             string `json:"status_file"`
 	Status                 string `json:"status"`
 	CommentFile            string `json:"comment_file"`
 	Comment                string `json:"comment"`
@@ -123,21 +138,24 @@ func (p *PutParameters) Validate() error {
 		return nil
 	}
 	// Make sure we are setting an allowed status
+	return validateStatus(p.Status)
+}
+
+func validateStatus(status string) error {
 	var allowedStatus bool
 
-	status := strings.ToLower(p.Status)
+	normalizedStatus := strings.ToLower(status)
 	allowed := []string{"success", "pending", "failure", "error"}
 
 	for _, a := range allowed {
-		if status == a {
+		if normalizedStatus == a {
 			allowedStatus = true
 		}
 	}
 
 	if !allowedStatus {
-		return fmt.Errorf("unknown status: %s", p.Status)
+		return fmt.Errorf("unknown status: %s", status)
 	}
-
 	return nil
 }
 
